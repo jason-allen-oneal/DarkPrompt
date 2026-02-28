@@ -88,7 +88,6 @@ darkprompt run --target openai --model gpt-4 --exploit-rank --redact "internal_d
 ## 🛤 Roadmap
 - [ ] Automated prompt mutation refinement via LLM-as-a-judge.
 - [ ] Advanced multi-turn interaction branching logic.
-- [ ] Integration with ZeroSignal Network orchestration for large-scale distributed auditing.
 
 ---
 
