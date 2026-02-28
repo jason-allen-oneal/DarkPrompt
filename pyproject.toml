@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "darkprompt"
+version = "1.0.0"
+description = "A comprehensive AI adversarial toolkit for model-agnostic security auditing, featuring systematic mutation sensitivity analysis, multi-turn stateful attacks, and ExploitRank intelligence integration."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "typer[all]",
+    "rich",
+    "python-dotenv",
+    "pydantic>=2.0",
+    "pyyaml",
+    "openai",
+    "httpx",
+]
+
+[project.scripts]
+darkprompt = "darkprompt.cli:app"
+aat = "darkprompt.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["darkprompt*"]

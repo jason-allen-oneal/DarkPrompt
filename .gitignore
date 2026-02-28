@@ -1,0 +1,10 @@
+venv/
+out/
+reports/
+__pycache__/
+*.pyc
+*.egg-info/
+.DS_Store
+.env
+data/eie.db
+*.log
