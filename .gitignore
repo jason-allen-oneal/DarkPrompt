@@ -8,3 +8,6 @@ __pycache__/
 .env
 data/eie.db
 *.log
+
+# Do not commit uv.lock in this repo
+uv.lock
