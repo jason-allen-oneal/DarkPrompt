@@ -8,6 +8,16 @@
 
 ---
 
+## What's new in v1.0.1
+
+- **Adaptive mode (LLM-as-a-judge):** `darkprompt run --adaptive` retries refused cases using bounded, deterministic mutations.
+  - Optional retry gate for bypass-style feedback: set `DARKPROMPT_ALLOW_JUDGE_BYPASS=1`.
+  - Optional refusal trigger analysis: set `DARKPROMPT_JUDGE_ANALYZE=1`.
+- **New mutations:** Unicode homoglyph swaps.
+- **Optional media payloads:** OCR image payload mutation when Pillow is installed (`pip install -e '.[media]'`). Media is written under your `--out` directory (for example `./out/media`).
+
+---
+
 ## 🛠 Core Capabilities
 
 ### 1. Model-Agnostic Architecture
@@ -25,6 +35,8 @@ Go beyond simple keyword testing. DarkPrompt features an automated mutation engi
 *   **Character Noise**: Injects delimiters (e.g., `H.e.l.p`) to disrupt tokenization-based security layers.
 *   **Reverse Text**: Tests the model's ability to un-reverse and follow malicious instructions.
 *   **Payload Splitting**: Fragments instructions into separate variables, instructing the model to reconstruct and execute them in-memory.
+*   **Homoglyph Swaps**: Replaces Latin characters with visually similar Unicode glyphs to probe normalization blind spots.
+*   **OCR Media Payload (optional)**: Renders payload text to an image (requires `darkprompt[media]`) to test multimodal handling.
 
 ### 3. Systematic Sensitivity Analysis
 Enable the `--sensitivity` flag to perform a exhaustive audit. DarkPrompt will take every test case in your pack and run it against **all** mutation types in parallel, generating a detailed report on which specific obfuscation techniques cause a model to break.
@@ -61,6 +73,11 @@ source venv/bin/activate
 pip install -e .
 ```
 
+Optional (media mutations / OCR payload):
+```bash
+pip install -e '.[media]'
+```
+
 ---
 
 ## 📖 Usage Examples
@@ -69,6 +86,12 @@ pip install -e .
 Run a baseline test pack against a local Mistral model:
 ```bash
 darkprompt run --pack ./sample_pack --target ollama --model mistral
+```
+
+### Adaptive Mode (LLM-as-a-judge)
+Retry refused cases using the adaptive judge loop:
+```bash
+darkprompt run --pack ./sample_pack --target openai --model gpt-4.1 --adaptive
 ```
 
 ### Systematic Sensitivity Analysis
@@ -86,7 +109,7 @@ darkprompt run --target openai --model gpt-4 --exploit-rank --redact "internal_d
 ---
 
 ## 🛤 Roadmap
-- [ ] Automated prompt mutation refinement via LLM-as-a-judge.
+- [x] Adaptive judge loop (LLM-as-a-judge) with bounded retries.
 - [ ] Advanced multi-turn interaction branching logic.
 
 ---
