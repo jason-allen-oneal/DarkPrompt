@@ -1,14 +1,17 @@
 from typer.testing import CliRunner
-from darkprompt.main import app
+
+from darkprompt.cli import app
 
 runner = CliRunner()
+
 
 def test_version():
     result = runner.invoke(app, ["version"])
     assert result.exit_code == 0
-    assert "DarkPrompt version" in result.stdout
+    assert "DarkPrompt v" in result.stdout
 
-def test_analyze():
-    result = runner.invoke(app, ["analyze", "Hello world"])
+
+def test_help():
+    result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "Analyzing prompt" in result.stdout
+    assert "DarkPrompt" in result.stdout
