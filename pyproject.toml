@@ -8,6 +8,10 @@ version = "1.0.1"
 description = "A comprehensive AI adversarial toolkit for model-agnostic security auditing, featuring systematic mutation sensitivity analysis, multi-turn stateful attacks, and ExploitRank intelligence integration."
 readme = "README.md"
 requires-python = ">=3.9"
+license = { text = "AGPL-3.0-or-later" }
+classifiers = [
+  "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+]
 dependencies = [
     "typer[all]",
     "rich",
