@@ -1,7 +1,7 @@
-# DarkPrompt - AI Adversarial Toolkit (AAT) v1.0.0
+# DarkPrompt - AI Adversarial Toolkit (AAT) v1.0.1
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
-[![Version](https://img.shields.io/badge/version-1.0.0-green.svg)](https://github.com/jason-allen-oneal/DarkPrompt/releases/tag/v1.0.0)
+[![Version](https://img.shields.io/badge/version-1.0.1-green.svg)](https://github.com/jason-allen-oneal/DarkPrompt/releases/tag/v1.0.1)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
 **DarkPrompt** is a professional-grade adversarial framework designed for the systematic security auditing of Large Language Models (LLMs). It enables security researchers and engineers to identify vulnerabilities in model alignment, safety filters, and PII protection across any LLM provider.

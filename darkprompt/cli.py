@@ -4,10 +4,12 @@ import json
 import copy
 from pathlib import Path
 from rich.console import Console
+from . import __version__
 from .runner import Runner
 from .reporter import Reporter
 from .redactor import RegexRedactor
 from .mutator import PromptMutator
+from .judge import JudgeFeedbackLoop
 from .adapters.openai import OpenAIAdapter
 from .adapters.ollama import OllamaAdapter
 from .adapters.anthropic import AnthropicAdapter
@@ -30,12 +32,13 @@ def run(
     mutate: bool = typer.Option(False, "--mutate", help="Apply random prompt mutations"),
     format: str = typer.Option("markdown", "--format", "-f", help="Report format"),
     sensitivity: bool = typer.Option(False, "--sensitivity", "-s", help="Run systematic mutation sensitivity analysis"),
+    adaptive: bool = typer.Option(False, "--adaptive", "-a", help="Enable LLM-as-a-judge feedback loop for adaptive retries"),
     exploit_rank: bool = typer.Option(False, "--exploit-rank", "--er", help="Pull latest real exploits from ExploitRank EIE")
 ):
     """
     Run a security test pack against a target adapter.
     """
-    console.print(f"[bold blue]Starting DarkPrompt Run (v0.4.0)[/bold blue]")
+    console.print(f"[bold blue]Starting DarkPrompt Run (v{__version__})[/bold blue]")
     
     if not model:
         defaults = {"openai": "gpt-3.5-turbo", "anthropic": "claude-3-5-sonnet-20241022", "ollama": "mistral", "huggingface": "meta-llama/Llama-3.2-3B-Instruct", "gemini": "gemini-1.5-flash", "mistral": "mistral-large-latest"}
@@ -59,8 +62,9 @@ def run(
     adapter = adapter_cls(**adapter_kwargs)
 
     redactor = RegexRedactor(patterns=redact.split(",")) if redact else None
-    mutator = PromptMutator()
+    mutator = PromptMutator(out_dir=str(out_dir / "media"))
     runner = Runner(adapter=adapter, redactor=redactor)
+    judge = JudgeFeedbackLoop(target_adapter=adapter) if adaptive else None
     
     try:
         all_traces = []
@@ -73,7 +77,7 @@ def run(
         else:
             # Create empty pack if only running ExploitRank
             from .models import TestPack
-            pack = TestPack(name="ExploitRank Bridge Run", description="Run pulling real-world exploits", version="0.4.0")
+            pack = TestPack(name="ExploitRank Bridge Run", description="Run pulling real-world exploits", version=__version__)
 
         # 2. Pull from ExploitRank if requested
         if exploit_rank:
@@ -92,9 +96,10 @@ def run(
             console.print("[red]No test cases loaded (neither from pack nor ExploitRank).[/red]")
             raise typer.Exit(1)
 
-        # 3. Process Cases (Standard or Sensitivity)
+        # 3. Process Cases (Standard, Adaptive, or Sensitivity)
         if sensitivity:
             console.print("[yellow]Sensitivity Analysis enabled. Running systematic mutations...[/yellow]")
+            mutation_names = ["Leet", "Base64", "Noise", "Reverse", "Caesar", "Homoglyph", "Split", "OCR"]
             for case in pack.cases:
                 # Original
                 console.print(f"  Testing Case {case.id} [Original]...")
@@ -102,19 +107,26 @@ def run(
                 
                 # Mutated variants
                 variants = mutator.apply_all(case.prompt)
-                mutation_names = ["Leet", "Base64", "Noise", "Reverse", "Caesar", "Split"]
+                # variants[0] is original
                 for i, v_prompt in enumerate(variants[1:]):
-                    m_name = mutation_names[i]
+                    m_name = mutation_names[i] if i < len(mutation_names) else f"Mutation-{i}"
                     console.print(f"  Testing Case {case.id} [{m_name}]...")
                     m_case = copy.deepcopy(case)
                     m_case.prompt = v_prompt
                     m_case.id = f"{case.id}-{m_name}"
                     all_traces.append(runner.run_case(m_case))
+        elif adaptive:
+            console.print("[yellow]Adaptive Mode enabled. Retrying on refusal with Judge feedback...[/yellow]")
+            for case in pack.cases:
+                console.print(f"  Running adaptive case: [bold]{case.id}[/bold]")
+                all_traces.append(judge.run_adaptive_case(case))
         else:
             if mutate:
                 for case in pack.cases:
                     case.prompt = random.choice(mutator.apply_all(case.prompt)[1:])
-            all_traces = runner.run(pack)
+            # standard run
+            for case in pack.cases:
+                all_traces.append(runner.run_case(case))
         
         # Inject metadata
         for trace in all_traces:
@@ -135,7 +147,7 @@ def run(
 
 @app.command()
 def version():
-    console.print("DarkPrompt v0.4.0")
+    console.print(f"DarkPrompt v{__version__}")
 
 if __name__ == "__main__":
     app()

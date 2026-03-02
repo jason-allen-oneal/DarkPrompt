@@ -2,15 +2,16 @@ import json
 import re
 from typing import List
 from pathlib import Path
+from . import __version__
 from .models import ExecutionTrace, TestPack
 
 class Reporter:
-    """v0.2.0: Advanced reporting with heatmap generation and automated scoring."""
+    """Reporting utilities."""
     
     def generate_markdown(self, pack: TestPack, traces: List[ExecutionTrace], out_dir: Path):
         report_path = out_dir / "report.md"
         with open(report_path, "w") as f:
-            f.write(f"# DarkPrompt Security Audit Report (v0.2.0)\n\n")
+            f.write(f"# DarkPrompt Security Audit Report (v{__version__})\n\n")
             f.write(f"## Pack: {pack.name} (v{pack.version})\n")
             f.write(f"{pack.description}\n\n")
             
