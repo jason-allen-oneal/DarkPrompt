@@ -1,5 +1,5 @@
 <p align="center">
-![DarkPrompt banner](docs/images/banner.png)
+<img src="docs/images/banner.png" />
 </p>
 # DarkPrompt - AI Adversarial Toolkit (AAT)
 
