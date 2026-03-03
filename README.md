@@ -1,3 +1,4 @@
+![DarkPrompt banner](docs/assets/banner.png)
 # DarkPrompt - AI Adversarial Toolkit (AAT)
 
 [![CI](https://github.com/jason-allen-oneal/DarkPrompt/actions/workflows/ci.yml/badge.svg)](https://github.com/jason-allen-oneal/DarkPrompt/actions/workflows/ci.yml)
