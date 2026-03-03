@@ -1,7 +1,7 @@
 <p align="center">
 ![DarkPrompt banner](docs/images/banner.png)
 # DarkPrompt - AI Adversarial Toolkit (AAT)
-</p>>
+</p>
 [![CI](https://github.com/jason-allen-oneal/DarkPrompt/actions/workflows/ci.yml/badge.svg)](https://github.com/jason-allen-oneal/DarkPrompt/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/jason-allen-oneal/DarkPrompt/actions/workflows/codeql.yml/badge.svg)](https://github.com/jason-allen-oneal/DarkPrompt/actions/workflows/codeql.yml)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/jason-allen-oneal/DarkPrompt/badge)](https://securityscorecards.dev/viewer/?uri=github.com/jason-allen-oneal/DarkPrompt)
