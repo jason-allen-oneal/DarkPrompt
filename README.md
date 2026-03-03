@@ -1,7 +1,7 @@
 <p align="center">
 ![DarkPrompt banner](docs/images/banner.png)
 # DarkPrompt - AI Adversarial Toolkit (AAT)
-
+</p>>
 [![CI](https://github.com/jason-allen-oneal/DarkPrompt/actions/workflows/ci.yml/badge.svg)](https://github.com/jason-allen-oneal/DarkPrompt/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/jason-allen-oneal/DarkPrompt/actions/workflows/codeql.yml/badge.svg)](https://github.com/jason-allen-oneal/DarkPrompt/actions/workflows/codeql.yml)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/jason-allen-oneal/DarkPrompt/badge)](https://securityscorecards.dev/viewer/?uri=github.com/jason-allen-oneal/DarkPrompt)
@@ -10,7 +10,7 @@
 [![Contributing](https://img.shields.io/badge/contributing-guidelines-blue)](https://github.com/jason-allen-oneal/DarkPrompt/blob/main/CONTRIBUTING.md)
 
 **DarkPrompt** is a professional-grade adversarial framework designed for the systematic security auditing of Large Language Models (LLMs). It enables security researchers and engineers to identify vulnerabilities in model alignment, safety filters, and PII protection across any LLM provider.
-</p>
+
 ---
 
 ## What's new in v1.0.1
