@@ -1,6 +1,7 @@
 <p align="center">
 <img src="docs/images/banner.png" />
 </p>
+
 # DarkPrompt - AI Adversarial Toolkit (AAT)
 
 [![CI](https://github.com/jason-allen-oneal/DarkPrompt/actions/workflows/ci.yml/badge.svg)](https://github.com/jason-allen-oneal/DarkPrompt/actions/workflows/ci.yml)
