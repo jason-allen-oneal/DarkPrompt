@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=82.0.1"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -16,7 +16,7 @@ dependencies = [
     "typer[all]",
     "rich",
     "python-dotenv",
-    "pydantic>=2.0",
+    "pydantic>=2.12.5",
     "pyyaml",
     "openai",
     "httpx",
@@ -24,7 +24,7 @@ dependencies = [
 
 [project.optional-dependencies]
 media = [
-    "pillow>=10.0.0",
+    "pillow>=11.3.0",
 ]
 
 [project.scripts]
