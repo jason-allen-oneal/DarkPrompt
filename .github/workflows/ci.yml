@@ -36,7 +36,9 @@ jobs:
         run: uv run ruff check .
 
       - name: Test
-        run: uv run pytest -q --tb=short --cov=darkprompt --cov-report=term-missing 2>&1 | tee pytest.log
+        run: |
+          set -o pipefail
+          uv run pytest -q --tb=short --cov=darkprompt --cov-report=term-missing 2>&1 | tee pytest.log
 
       - name: Upload failed test log
         if: failure()
