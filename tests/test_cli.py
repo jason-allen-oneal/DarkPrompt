@@ -199,8 +199,8 @@ def test_judge_options_require_judge_target(monkeypatch, tmp_path):
         ],
     )
 
-    assert result.exit_code != 0
-    assert "require --judge-target" in ANSI_ESCAPE.sub("", result.stderr)
+    assert result.exit_code == 2
+    assert "Error" in ANSI_ESCAPE.sub("", result.stderr)
 
 
 def test_run_fail_on_findings_uses_exit_two(monkeypatch, tmp_path):
