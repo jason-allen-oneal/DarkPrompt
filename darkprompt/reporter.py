@@ -23,7 +23,7 @@ class Reporter:
         return {status.value: counts.get(status.value, 0) for status in EvaluationStatus}
 
     @staticmethod
-    def _metrics(traces: Iterable[ExecutionTrace]) -> dict[str, float | int | None]:
+    def _metrics(traces: Iterable[ExecutionTrace]) -> dict[str, object]:
         trace_list = list(traces)
         scored = [
             trace.evaluation.score
