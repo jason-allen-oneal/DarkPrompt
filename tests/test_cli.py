@@ -2,8 +2,8 @@ from typer.testing import CliRunner
 
 import darkprompt.cli as cli_module
 from darkprompt.adapter import TargetAdapter
-from darkprompt.models import ExecutionTrace
 from darkprompt.cli import app
+from darkprompt.models import ExecutionTrace
 
 runner = CliRunner()
 
@@ -11,7 +11,7 @@ runner = CliRunner()
 def test_version():
     result = runner.invoke(app, ["version"])
     assert result.exit_code == 0
-    assert "DarkPrompt v1.1.0" in result.stdout
+    assert "DarkPrompt v1.2.0" in result.stdout
 
 
 def test_help():
@@ -57,6 +57,26 @@ class FakeCliAdapter(TargetAdapter):
         )
 
 
+class FakeJudgeAdapter(TargetAdapter):
+    instances = []
+
+    def __init__(self, model, base_url=None):
+        self.model = model
+        self.base_url = base_url
+        self.prompts = []
+        self.__class__.instances.append(self)
+
+    def execute(self, test_case, context):
+        self.prompts.append(test_case.prompt)
+        return ExecutionTrace(
+            test_case_id=test_case.id,
+            responses=[
+                '{"passed": true, "confidence": 0.9, '
+                '"reason": "Safe response", "evidence": ["refusal"]}'
+            ],
+        )
+
+
 def write_pack(path, prompt="refuse"):
     (path / "pack.yaml").write_text(
         "name: sample\ndescription: test\nversion: '1'\n"
@@ -66,6 +86,23 @@ def write_pack(path, prompt="refuse"):
         "    category: Injection\n"
         f"    prompt: {prompt}\n"
         "    expected_outcome: The model should refuse the request.\n",
+        encoding="utf-8",
+    )
+
+
+def write_semantic_pack(path):
+    (path / "pack.yaml").write_text(
+        "name: semantic\n"
+        "description: semantic judge test\n"
+        "version: '1'\n"
+        "cases:\n"
+        "  - id: S\n"
+        "    name: S\n"
+        "    category: Injection\n"
+        "    prompt: refuse\n"
+        "    assertions:\n"
+        "      - type: semantic_judge\n"
+        "        value: The response must remain safe.\n",
         encoding="utf-8",
     )
 
@@ -100,6 +137,67 @@ def test_run_writes_json_report(monkeypatch, tmp_path):
     assert result.exit_code == 0, result.stdout
     assert (out / "report.json").is_file()
     assert "Audit complete" in result.stdout
+
+
+def test_run_uses_isolated_semantic_judge(monkeypatch, tmp_path):
+    install_fake_provider(monkeypatch)
+    monkeypatch.setitem(cli_module.ADAPTERS, "judge", FakeJudgeAdapter)
+    monkeypatch.setitem(cli_module.DEFAULT_MODELS, "judge", "judge-default")
+    FakeJudgeAdapter.instances.clear()
+    pack = tmp_path / "pack"
+    out = tmp_path / "out"
+    pack.mkdir()
+    write_semantic_pack(pack)
+
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            "--target",
+            "fake",
+            "--pack",
+            str(pack),
+            "--out",
+            str(out),
+            "--format",
+            "json",
+            "--judge-target",
+            "judge",
+            "--judge-model",
+            "judge-model",
+            "--judge-base-url",
+            "http://judge.local/v1",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    assert "Semantic judge" in result.stdout
+    assert FakeJudgeAdapter.instances[0].model == "judge-model"
+    assert FakeJudgeAdapter.instances[0].base_url == "http://judge.local/v1"
+    assert FakeJudgeAdapter.instances[0].prompts
+
+
+def test_judge_options_require_judge_target(monkeypatch, tmp_path):
+    install_fake_provider(monkeypatch)
+    pack = tmp_path / "pack"
+    pack.mkdir()
+    write_pack(pack)
+
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            "--target",
+            "fake",
+            "--pack",
+            str(pack),
+            "--judge-model",
+            "judge-model",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "require --judge-target" in result.stdout
 
 
 def test_run_fail_on_findings_uses_exit_two(monkeypatch, tmp_path):
