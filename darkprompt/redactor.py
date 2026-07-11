@@ -39,6 +39,15 @@ class RegexRedactor:
                 )
                 total += reason_count + evidence_count
 
+                for assertion in trace.evaluation.assertions:
+                    assertion.reason, assertion_reason_count = regex.subn(
+                        "[REDACTED]", assertion.reason
+                    )
+                    assertion.evidence, assertion_evidence_count = self._redact_values(
+                        assertion.evidence, regex
+                    )
+                    total += assertion_reason_count + assertion_evidence_count
+
             if total:
                 trace.redactions.append(Redaction(pattern=raw_pattern, match_count=total))
 

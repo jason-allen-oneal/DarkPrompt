@@ -2,6 +2,28 @@
 
 All notable changes to DarkPrompt are documented here.
 
+## 1.2.0
+
+### Added
+
+- Typed assertions for refusal, content, regex, JSON Schema, tool-call, and semantic checks.
+- Assertion scopes for final response, any response, all responses, and a specific one-based turn.
+- Weighted assertion scores and per-assertion confidence, reasons, and evidence.
+- Optional isolated semantic judge provider through `--judge-target`, `--judge-model`, and `--judge-base-url`.
+- Draft 2020-12 JSON Schema validation during pack loading and response evaluation.
+- Detailed assertion tables and aggregate assertion metrics in Markdown and JSON reports.
+
+### Changed
+
+- Assertions now take precedence over legacy free-form `expected_outcome` evaluation.
+- Semantic judge failures and malformed judge output are marked inconclusive instead of being guessed.
+- Redaction now covers assertion-level reasons and evidence.
+- JSON report schema version increased to 1.2.
+
+### Compatibility
+
+- Existing test packs using only `expected_outcome` continue to work.
+
 ## 1.1.0
 
 ### Added

@@ -77,6 +77,18 @@ def _redaction_patterns(values: List[str]) -> List[str]:
     return patterns
 
 
+def _normalize_provider(value: Optional[str]) -> Optional[str]:
+    return value.lower().strip() if value else None
+
+
+def _validate_provider(value: str, option_name: str) -> None:
+    if value not in ADAPTERS:
+        raise typer.BadParameter(
+            f"Unknown provider {value!r}. Choose from: {', '.join(sorted(ADAPTERS))}.",
+            param_hint=option_name,
+        )
+
+
 @app.command()
 def run(
     target: str = typer.Option("openai", "--target", "-t", help="Target adapter."),
@@ -91,7 +103,22 @@ def run(
         [], "--redact", help="Regex to redact. May be repeated."
     ),
     base_url: Optional[str] = typer.Option(
-        None, "--base-url", help="Override the provider API base URL."
+        None, "--base-url", help="Override the target provider API base URL."
+    ),
+    judge_target: Optional[str] = typer.Option(
+        None,
+        "--judge-target",
+        help="Separate provider used for semantic_judge assertions.",
+    ),
+    judge_model: Optional[str] = typer.Option(
+        None,
+        "--judge-model",
+        help="Model used by the semantic judge provider.",
+    ),
+    judge_base_url: Optional[str] = typer.Option(
+        None,
+        "--judge-base-url",
+        help="Override the semantic judge provider API base URL.",
     ),
     mutate: bool = typer.Option(
         False, "--mutate", help="Apply one deterministic random mutation per case."
@@ -130,11 +157,16 @@ def run(
     ),
 ):
     """Run an adversarial test pack against one target provider."""
-    target = target.lower().strip()
+    target = _normalize_provider(target) or "openai"
+    judge_target = _normalize_provider(judge_target)
     report_format = report_format.lower().strip()
-    if target not in ADAPTERS:
+    _validate_provider(target, "--target")
+    if judge_target:
+        _validate_provider(judge_target, "--judge-target")
+    elif judge_model or judge_base_url:
         raise typer.BadParameter(
-            f"Unknown target {target!r}. Choose from: {', '.join(sorted(ADAPTERS))}."
+            "--judge-model and --judge-base-url require --judge-target.",
+            param_hint="--judge-target",
         )
     if report_format not in {"markdown", "json"}:
         raise typer.BadParameter("--format must be either markdown or json.")
@@ -148,7 +180,18 @@ def run(
     try:
         redactor = RegexRedactor(_redaction_patterns(redact)) if redact else None
         adapter = ADAPTERS[target](model=model, base_url=base_url)
-        evaluator = RuleEvaluator()
+        judge_adapter = None
+        if judge_target:
+            resolved_judge_model = judge_model or DEFAULT_MODELS[judge_target]
+            judge_adapter = ADAPTERS[judge_target](
+                model=resolved_judge_model,
+                base_url=judge_base_url,
+            )
+            console.print(
+                f"Semantic judge: provider=[green]{judge_target}[/green] "
+                f"model=[green]{resolved_judge_model}[/green]"
+            )
+        evaluator = RuleEvaluator(judge_adapter=judge_adapter)
         runner = Runner(adapter=adapter, redactor=redactor, evaluator=evaluator)
         mutator = PromptMutator(seed=seed, out_dir=str(out_dir / "media"))
 
@@ -222,6 +265,7 @@ def run(
 
             jobs = []
             for case, mutation_name in cases:
+
                 def execute(
                     current_case=case,
                     name=mutation_name,
