@@ -36,7 +36,14 @@ jobs:
         run: uv run ruff check .
 
       - name: Test
-        run: uv run pytest -q --tb=short --cov=darkprompt --cov-report=term-missing
+        run: uv run pytest -q --tb=short --cov=darkprompt --cov-report=term-missing 2>&1 | tee pytest.log
+
+      - name: Upload failed test log
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.1
+        with:
+          name: pytest-${{ matrix.python-version }}
+          path: pytest.log
 
   package:
     runs-on: ubuntu-latest
