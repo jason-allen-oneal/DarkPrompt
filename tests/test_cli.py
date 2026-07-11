@@ -1,4 +1,5 @@
-from click.utils import strip_ansi
+import re
+
 from typer.testing import CliRunner
 
 import darkprompt.cli as cli_module
@@ -7,6 +8,7 @@ from darkprompt.cli import app
 from darkprompt.models import ExecutionTrace
 
 runner = CliRunner()
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
 def test_version():
@@ -198,7 +200,7 @@ def test_judge_options_require_judge_target(monkeypatch, tmp_path):
     )
 
     assert result.exit_code != 0
-    assert "require --judge-target" in strip_ansi(result.stderr)
+    assert "require --judge-target" in ANSI_ESCAPE.sub("", result.stderr)
 
 
 def test_run_fail_on_findings_uses_exit_two(monkeypatch, tmp_path):
