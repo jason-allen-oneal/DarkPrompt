@@ -36,7 +36,7 @@ jobs:
         run: uv run ruff check .
 
       - name: Test
-        run: uv run pytest --cov=darkprompt --cov-report=term-missing
+        run: uv run pytest -q --tb=short --cov=darkprompt --cov-report=term-missing
 
   package:
     runs-on: ubuntu-latest
