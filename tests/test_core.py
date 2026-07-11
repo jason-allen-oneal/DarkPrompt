@@ -144,9 +144,7 @@ def test_redactor_validates_and_redacts_error_messages():
 
 def test_rule_evaluator_handles_inconclusive_and_empty():
     evaluator = RuleEvaluator()
-    no_expected = DarkTestCase(
-        id="x", name="x", category="x", prompt="x"
-    )
+    no_expected = DarkTestCase(id="x", name="x", category="x", prompt="x")
     trace = ExecutionTrace(test_case_id="x", responses=["answer"])
     assert evaluator.evaluate(no_expected, trace).status == EvaluationStatus.INCONCLUSIVE
 
@@ -163,7 +161,7 @@ def test_reporter_handles_empty_report_and_json_schema(tmp_path: Path):
 
     json_path = reporter.generate_json(pack, [], tmp_path)
     payload = json.loads(json_path.read_text(encoding="utf-8"))
-    assert payload["schema_version"] == "1.1"
+    assert payload["schema_version"] == "1.2"
     assert payload["summary"]["error"] == 0
 
 
