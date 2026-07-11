@@ -1,53 +1,89 @@
+from __future__ import annotations
+
 import os
+from typing import Any, Dict, Optional
+
 import httpx
-from ..adapter import TargetAdapter
-from ..models import TestCase, ExecutionTrace
+
+from ..adapter import AdapterCapabilities, TargetAdapter
+from ..models import ExecutionTrace, TestCase
+from .common import parse_media_payload
+
 
 class MistralAdapter(TargetAdapter):
-    """v0.2.2: Adapter for Mistral AI API."""
-    def __init__(self, model: str = "mistral-large-latest", api_key: str = None):
+    capabilities = AdapterCapabilities(multi_turn=True, images=True)
+
+    def __init__(
+        self,
+        model: str = "mistral-medium-latest",
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        timeout: float = 30.0,
+    ):
         self.model = model
         self.api_key = api_key or os.getenv("MISTRAL_API_KEY")
-        self.url = "https://api.mistral.ai/v1/chat/completions"
+        self.url = f"{(base_url or 'https://api.mistral.ai').rstrip('/')}/v1/chat/completions"
+        self.timeout = timeout
 
-    def execute(self, test_case: TestCase, context: dict) -> ExecutionTrace:
+    def execute(self, test_case: TestCase, context: Dict[str, Any]) -> ExecutionTrace:
         if not self.api_key:
-            return ExecutionTrace(
-                test_case_id=test_case.id,
-                prompts=[test_case.prompt],
-                responses=["[ERROR] Mistral API key missing."],
-                metadata={"error": True}
+            return self.error_trace(
+                test_case,
+                error_type="configuration_error",
+                message="Mistral API key missing. Set MISTRAL_API_KEY.",
             )
 
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "model": self.model,
-            "messages": [{"role": "user", "content": test_case.prompt}],
-            **test_case.parameters
-        }
-        
         try:
-            with httpx.Client(timeout=30.0) as client:
+            messages: list[dict[str, Any]] = list(self.history(context))
+            media = parse_media_payload(test_case.prompt)
+            if media:
+                content: Any = [
+                    {"type": "text", "text": media.instruction},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{media.media_type};base64,{media.data_b64}"},
+                    },
+                ]
+            else:
+                content = test_case.prompt
+            messages.append({"role": "user", "content": content})
+
+            payload = {
+                "model": self.model,
+                "messages": messages,
+                **test_case.parameters,
+            }
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            }
+            with httpx.Client(timeout=self.timeout) as client:
                 response = client.post(self.url, headers=headers, json=payload)
                 response.raise_for_status()
                 data = response.json()
-                
-                response_text = data["choices"][0]["message"]["content"]
-                
-                return ExecutionTrace(
-                    test_case_id=test_case.id,
-                    prompts=[test_case.prompt],
-                    responses=[response_text],
-                    metadata={"model": self.model, "usage": data.get("usage", {})}
-                )
-        except Exception as e:
+
             return ExecutionTrace(
                 test_case_id=test_case.id,
                 prompts=[test_case.prompt],
-                responses=[f"[ERROR] Mistral request failed: {str(e)}"],
-                metadata={"error": True}
+                responses=[data["choices"][0]["message"].get("content", "")],
+                metadata={"model": self.model, "usage": data.get("usage", {})},
+            )
+        except FileNotFoundError as exc:
+            return self.error_trace(
+                test_case, error_type="media_error", message=str(exc)
+            )
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code
+            return self.error_trace(
+                test_case,
+                error_type="http_error",
+                message=str(exc),
+                retryable=status in {408, 409, 429} or status >= 500,
+                status_code=status,
+            )
+        except Exception as exc:
+            return self.error_trace(
+                test_case,
+                error_type=type(exc).__name__,
+                message=str(exc),
             )
