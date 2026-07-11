@@ -1,6 +1,14 @@
 venv/
+.venv/
 out/
 reports/
+dist/
+build/
+htmlcov/
+.coverage
+coverage.xml
+.pytest_cache/
+.ruff_cache/
 __pycache__/
 *.pyc
 *.egg-info/
@@ -9,5 +17,5 @@ __pycache__/
 data/eie.db
 *.log
 
-# Do not commit uv.lock in this repo
+# Dependency lock policy for this library
 uv.lock

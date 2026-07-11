@@ -1,49 +1,83 @@
+from __future__ import annotations
+
 import os
+from typing import Any, Dict, Optional
+
 import httpx
-from ..adapter import TargetAdapter
-from ..models import TestCase, ExecutionTrace
+
+from ..adapter import AdapterCapabilities, TargetAdapter
+from ..models import ExecutionTrace, TestCase
+
 
 class HuggingFaceAdapter(TargetAdapter):
-    """v0.2.1: Adapter for Hugging Face Inference API."""
-    def __init__(self, model: str = "meta-llama/Llama-3.2-3B-Instruct", api_key: str = None):
-        self.model = model
-        self.api_key = api_key or os.getenv("HUGGINGFACE_API_KEY")
-        self.url = f"https://api-inference.huggingface.co/models/{model}"
+    capabilities = AdapterCapabilities(multi_turn=True)
 
-    def execute(self, test_case: TestCase, context: dict) -> ExecutionTrace:
+    def __init__(
+        self,
+        model: str = "meta-llama/Llama-3.2-3B-Instruct",
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        timeout: float = 30.0,
+    ):
+        self.model = model
+        self.api_key = (
+            api_key
+            or os.getenv("HUGGINGFACE_API_KEY")
+            or os.getenv("HF_TOKEN")
+        )
+        self.url = f"{(base_url or 'https://router.huggingface.co').rstrip('/')}/v1/chat/completions"
+        self.timeout = timeout
+
+    def execute(self, test_case: TestCase, context: Dict[str, Any]) -> ExecutionTrace:
         if not self.api_key:
-            return ExecutionTrace(
-                test_case_id=test_case.id,
-                prompts=[test_case.prompt],
-                responses=["[ERROR] Hugging Face API key missing."],
-                metadata={"error": True}
+            return self.error_trace(
+                test_case,
+                error_type="configuration_error",
+                message="Hugging Face token missing. Set HUGGINGFACE_API_KEY or HF_TOKEN.",
             )
 
-        headers = {"Authorization": f"Bearer {self.api_key}"}
-        payload = {
-            "inputs": test_case.prompt,
-            "parameters": test_case.parameters
-        }
-        
+        if test_case.prompt.lstrip().startswith("[MEDIA_PAYLOAD:"):
+            return self.error_trace(
+                test_case,
+                error_type="unsupported_capability",
+                message="The generic Hugging Face chat adapter does not support image payloads.",
+            )
+
         try:
-            with httpx.Client(timeout=30.0) as client:
+            messages: list[dict[str, Any]] = list(self.history(context))
+            messages.append({"role": "user", "content": test_case.prompt})
+            payload = {
+                "model": self.model,
+                "messages": messages,
+                **test_case.parameters,
+            }
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            }
+            with httpx.Client(timeout=self.timeout) as client:
                 response = client.post(self.url, headers=headers, json=payload)
                 response.raise_for_status()
                 data = response.json()
-                
-                # HF Inference API returns a list of results
-                response_text = data[0].get("generated_text", "") if isinstance(data, list) else str(data)
-                
-                return ExecutionTrace(
-                    test_case_id=test_case.id,
-                    prompts=[test_case.prompt],
-                    responses=[response_text],
-                    metadata={"model": self.model}
-                )
-        except Exception as e:
+
             return ExecutionTrace(
                 test_case_id=test_case.id,
                 prompts=[test_case.prompt],
-                responses=[f"[ERROR] Hugging Face request failed: {str(e)}"],
-                metadata={"error": True}
+                responses=[data["choices"][0]["message"].get("content", "")],
+                metadata={"model": self.model, "usage": data.get("usage", {})},
+            )
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code
+            return self.error_trace(
+                test_case,
+                error_type="http_error",
+                message=str(exc),
+                retryable=status in {408, 409, 429} or status >= 500,
+                status_code=status,
+            )
+        except Exception as exc:
+            return self.error_trace(
+                test_case,
+                error_type=type(exc).__name__,
+                message=str(exc),
             )

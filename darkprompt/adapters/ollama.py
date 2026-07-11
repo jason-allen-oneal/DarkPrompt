@@ -1,40 +1,79 @@
+from __future__ import annotations
+
+from typing import Any, Dict, Optional
+
 import httpx
-import json
-from ..adapter import TargetAdapter
-from ..models import TestCase, ExecutionTrace
+
+from ..adapter import AdapterCapabilities, TargetAdapter
+from ..models import ExecutionTrace, TestCase
+from .common import parse_media_payload
+
 
 class OllamaAdapter(TargetAdapter):
-    def __init__(self, model: str = "mistral", base_url: str = "http://localhost:11434"):
-        self.model = model
-        self.base_url = f"{base_url}/api/generate" # Using /api/generate for simplicity in v0.1
+    capabilities = AdapterCapabilities(multi_turn=True, images=True)
 
-    def execute(self, test_case: TestCase, context: dict) -> ExecutionTrace:
-        payload = {
-            "model": self.model,
-            "prompt": test_case.prompt,
-            "stream": False,
-            "options": test_case.parameters
-        }
-        
+    def __init__(
+        self,
+        model: str = "mistral",
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        timeout: float = 60.0,
+    ):
+        del api_key
+        self.model = model
+        self.url = f"{(base_url or 'http://localhost:11434').rstrip('/')}/api/chat"
+        self.timeout = timeout
+
+    def execute(self, test_case: TestCase, context: Dict[str, Any]) -> ExecutionTrace:
         try:
-            with httpx.Client(timeout=60.0) as client:
-                response = client.post(self.base_url, json=payload)
+            messages: list[dict[str, Any]] = list(self.history(context))
+            media = parse_media_payload(test_case.prompt)
+            current: dict[str, Any] = {
+                "role": "user",
+                "content": media.instruction if media else test_case.prompt,
+            }
+            if media:
+                current["images"] = [media.data_b64]
+            messages.append(current)
+
+            payload = {
+                "model": self.model,
+                "messages": messages,
+                "stream": False,
+                "options": test_case.parameters,
+            }
+            with httpx.Client(timeout=self.timeout) as client:
+                response = client.post(self.url, json=payload)
                 response.raise_for_status()
                 data = response.json()
-                
-                response_text = data.get("response", "")
-                
-                trace = ExecutionTrace(
-                    test_case_id=test_case.id,
-                    prompts=[test_case.prompt],
-                    responses=[response_text],
-                    metadata={"model": self.model, "total_duration": data.get("total_duration")}
-                )
-                return trace
-        except Exception as e:
+
             return ExecutionTrace(
                 test_case_id=test_case.id,
                 prompts=[test_case.prompt],
-                responses=[f"[ERROR] Ollama request failed: {str(e)}"],
-                metadata={"error": True}
+                responses=[data.get("message", {}).get("content", "")],
+                metadata={
+                    "model": self.model,
+                    "total_duration": data.get("total_duration"),
+                    "prompt_eval_count": data.get("prompt_eval_count"),
+                    "eval_count": data.get("eval_count"),
+                },
+            )
+        except FileNotFoundError as exc:
+            return self.error_trace(
+                test_case, error_type="media_error", message=str(exc)
+            )
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code
+            return self.error_trace(
+                test_case,
+                error_type="http_error",
+                message=str(exc),
+                retryable=status in {408, 409, 429} or status >= 500,
+                status_code=status,
+            )
+        except Exception as exc:
+            return self.error_trace(
+                test_case,
+                error_type=type(exc).__name__,
+                message=str(exc),
             )

@@ -1,153 +1,289 @@
-import typer
-import random
-import json
-import copy
-from pathlib import Path
-from rich.console import Console
-from . import __version__
-from .runner import Runner
-from .reporter import Reporter
-from .redactor import RegexRedactor
-from .mutator import PromptMutator
-from .judge import JudgeFeedbackLoop
-from .adapters.openai import OpenAIAdapter
-from .adapters.ollama import OllamaAdapter
-from .adapters.anthropic import AnthropicAdapter
-from .adapters.huggingface import HuggingFaceAdapter
-from .adapters.gemini import GeminiAdapter
-from .adapters.mistral import MistralAdapter
-from .adapters.exploitrank import ExploitRankBridge
+from __future__ import annotations
 
-app = typer.Typer(help="DarkPrompt: Security-focused prompt analysis and LLM interaction tool.")
+import copy
+import random
+import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
+from typing import Callable, Iterable, List, Optional
+
+import typer
+from rich.console import Console
+
+from . import __version__
+from .adapters.anthropic import AnthropicAdapter
+from .adapters.exploitrank import ExploitRankBridge
+from .adapters.gemini import GeminiAdapter
+from .adapters.huggingface import HuggingFaceAdapter
+from .adapters.mistral import MistralAdapter
+from .adapters.ollama import OllamaAdapter
+from .adapters.openai import OpenAIAdapter
+from .evaluator import RuleEvaluator
+from .judge import JudgeFeedbackLoop
+from .models import EvaluationStatus, ExecutionTrace, TestPack
+from .mutator import PromptMutator
+from .redactor import RedactionPatternError, RegexRedactor
+from .reporter import Reporter
+from .runner import PackLoadError, Runner
+
+app = typer.Typer(
+    help="DarkPrompt: repeatable adversarial security testing for LLM targets.",
+    no_args_is_help=True,
+)
 console = Console()
+
+ADAPTERS = {
+    "openai": OpenAIAdapter,
+    "ollama": OllamaAdapter,
+    "anthropic": AnthropicAdapter,
+    "huggingface": HuggingFaceAdapter,
+    "gemini": GeminiAdapter,
+    "mistral": MistralAdapter,
+}
+
+DEFAULT_MODELS = {
+    "openai": "gpt-5.6-luna",
+    "anthropic": "claude-sonnet-5",
+    "ollama": "mistral",
+    "huggingface": "meta-llama/Llama-3.2-3B-Instruct",
+    "gemini": "gemini-3.5-flash",
+    "mistral": "mistral-medium-latest",
+}
+
+
+def _run_parallel(
+    jobs: Iterable[Callable[[], ExecutionTrace]],
+    max_workers: int,
+) -> List[ExecutionTrace]:
+    functions = list(jobs)
+    if max_workers <= 1:
+        return [function() for function in functions]
+
+    results: list[Optional[ExecutionTrace]] = [None] * len(functions)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_map = {
+            executor.submit(function): index
+            for index, function in enumerate(functions)
+        }
+        for future in as_completed(future_map):
+            results[future_map[future]] = future.result()
+    return [result for result in results if result is not None]
+
+
+def _redaction_patterns(values: List[str]) -> List[str]:
+    patterns: list[str] = []
+    for value in values:
+        patterns.extend(item.strip() for item in value.split(",") if item.strip())
+    return patterns
+
 
 @app.command()
 def run(
-    target: str = typer.Option("openai", "--target", "-t", help="Target adapter"),
-    pack_dir: Path = typer.Option(None, "--pack", "-p", help="Directory containing the test pack"),
-    out_dir: Path = typer.Option(Path("./out"), "--out", "-o", help="Output directory"),
-    model: str = typer.Option(None, "--model", "-m", help="Model name"),
-    redact: str = typer.Option(None, "--redact", help="Regex patterns for redaction"),
-    base_url: str = typer.Option(None, "--base-url", help="Override base URL"),
-    mutate: bool = typer.Option(False, "--mutate", help="Apply random prompt mutations"),
-    format: str = typer.Option("markdown", "--format", "-f", help="Report format"),
-    sensitivity: bool = typer.Option(False, "--sensitivity", "-s", help="Run systematic mutation sensitivity analysis"),
-    adaptive: bool = typer.Option(False, "--adaptive", "-a", help="Enable LLM-as-a-judge feedback loop for adaptive retries"),
-    exploit_rank: bool = typer.Option(False, "--exploit-rank", "--er", help="Pull latest real exploits from ExploitRank EIE")
+    target: str = typer.Option("openai", "--target", "-t", help="Target adapter."),
+    pack_dir: Optional[Path] = typer.Option(
+        None, "--pack", "-p", help="Directory containing the test pack."
+    ),
+    out_dir: Path = typer.Option(
+        Path("./out"), "--out", "-o", help="Output directory."
+    ),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="Model name."),
+    redact: List[str] = typer.Option(
+        [], "--redact", help="Regex to redact. May be repeated."
+    ),
+    base_url: Optional[str] = typer.Option(
+        None, "--base-url", help="Override the provider API base URL."
+    ),
+    mutate: bool = typer.Option(
+        False, "--mutate", help="Apply one deterministic random mutation per case."
+    ),
+    report_format: str = typer.Option(
+        "markdown", "--format", "-f", help="Report format: markdown or json."
+    ),
+    sensitivity: bool = typer.Option(
+        False, "--sensitivity", "-s", help="Run every supported mutation."
+    ),
+    adaptive: bool = typer.Option(
+        False, "--adaptive", "-a", help="Retry refused cases with bounded mutations."
+    ),
+    exploit_rank: bool = typer.Option(
+        False, "--exploit-rank", "--er", help="Load cases from an ExploitRank database."
+    ),
+    exploit_db: Optional[Path] = typer.Option(
+        None, "--exploit-db", help="Path to the ExploitRank SQLite database."
+    ),
+    exploit_limit: int = typer.Option(
+        3, "--exploit-limit", min=1, help="Maximum ExploitRank cases to load."
+    ),
+    seed: Optional[int] = typer.Option(
+        None, "--seed", help="Seed used for reproducible mutations."
+    ),
+    max_workers: int = typer.Option(
+        1, "--max-workers", min=1, help="Maximum concurrent requests."
+    ),
+    max_retries: int = typer.Option(
+        2, "--max-retries", min=0, help="Maximum adaptive retries."
+    ),
+    fail_on_findings: bool = typer.Option(
+        False,
+        "--fail-on-findings",
+        help="Exit with status 2 when FAIL or PARTIAL findings are present.",
+    ),
 ):
-    """
-    Run a security test pack against a target adapter.
-    """
-    console.print(f"[bold blue]Starting DarkPrompt Run (v{__version__})[/bold blue]")
-    
-    if not model:
-        defaults = {"openai": "gpt-3.5-turbo", "anthropic": "claude-3-5-sonnet-20241022", "ollama": "mistral", "huggingface": "meta-llama/Llama-3.2-3B-Instruct", "gemini": "gemini-1.5-flash", "mistral": "mistral-large-latest"}
-        model = defaults.get(target, "default")
+    """Run an adversarial test pack against one target provider."""
+    target = target.lower().strip()
+    report_format = report_format.lower().strip()
+    if target not in ADAPTERS:
+        raise typer.BadParameter(
+            f"Unknown target {target!r}. Choose from: {', '.join(sorted(ADAPTERS))}."
+        )
+    if report_format not in {"markdown", "json"}:
+        raise typer.BadParameter("--format must be either markdown or json.")
 
-    console.print(f"Target: [green]{target}[/green] | Model: [green]{model}[/green]")
-    
-    # Initialize components
-    adapters = {
-        "openai": OpenAIAdapter, "ollama": OllamaAdapter, "anthropic": AnthropicAdapter, 
-        "huggingface": HuggingFaceAdapter, "gemini": GeminiAdapter, "mistral": MistralAdapter
-    }
-    
-    if target not in adapters:
-        console.print(f"[red]Unknown target: {target}[/red]")
-        raise typer.Exit(1)
-        
-    adapter_cls = adapters[target]
-    adapter_kwargs = {"model": model}
-    if target == "ollama" and base_url: adapter_kwargs["base_url"] = base_url
-    adapter = adapter_cls(**adapter_kwargs)
+    model = model or DEFAULT_MODELS[target]
+    console.print(
+        f"[bold blue]Starting DarkPrompt v{__version__}[/bold blue] "
+        f"target=[green]{target}[/green] model=[green]{model}[/green]"
+    )
 
-    redactor = RegexRedactor(patterns=redact.split(",")) if redact else None
-    mutator = PromptMutator(out_dir=str(out_dir / "media"))
-    runner = Runner(adapter=adapter, redactor=redactor)
-    judge = JudgeFeedbackLoop(target_adapter=adapter) if adaptive else None
-    
     try:
-        all_traces = []
-        
-        # 1. Load pack cases if pack_dir is provided
-        pack = None
+        redactor = RegexRedactor(_redaction_patterns(redact)) if redact else None
+        adapter = ADAPTERS[target](model=model, base_url=base_url)
+        evaluator = RuleEvaluator()
+        runner = Runner(adapter=adapter, redactor=redactor, evaluator=evaluator)
+        mutator = PromptMutator(seed=seed, out_dir=str(out_dir / "media"))
+
         if pack_dir:
             pack = runner.load_pack(pack_dir)
-            console.print(f"Loaded pack: [bold]{pack.name}[/bold]")
         else:
-            # Create empty pack if only running ExploitRank
-            from .models import TestPack
-            pack = TestPack(name="ExploitRank Bridge Run", description="Run pulling real-world exploits", version=__version__)
+            pack = TestPack(
+                name="Generated DarkPrompt Run",
+                description="Cases generated from configured external sources.",
+                version=__version__,
+            )
 
-        # 2. Pull from ExploitRank if requested
         if exploit_rank:
-            console.print("[yellow]ExploitRank Bridge active. Pulling latest real-world exploits...[/yellow]")
-            bridge = ExploitRankBridge()
-            exploits = bridge.get_latest_exploits(limit=3)
-            if not exploits:
-                console.print("[red]No real exploits found in EIE database. Ensure ExploitRank is populated.[/red]")
-            else:
-                for exp in exploits:
-                    case = bridge.generate_case_from_exploit(exp)
-                    pack.cases.append(case)
-                    console.print(f"  Added real-world case: [bold]{case.id}[/bold]")
+            bridge = ExploitRankBridge(str(exploit_db) if exploit_db else None)
+            for exploit in bridge.get_latest_exploits(limit=exploit_limit):
+                pack.cases.append(bridge.generate_case_from_exploit(exploit))
 
         if not pack.cases:
-            console.print("[red]No test cases loaded (neither from pack nor ExploitRank).[/red]")
-            raise typer.Exit(1)
+            raise ValueError(
+                "No test cases loaded. Provide --pack or configure --exploit-rank."
+            )
 
-        # 3. Process Cases (Standard, Adaptive, or Sensitivity)
+        traces: List[ExecutionTrace]
         if sensitivity:
-            console.print("[yellow]Sensitivity Analysis enabled. Running systematic mutations...[/yellow]")
-            mutation_names = ["Leet", "Base64", "Noise", "Reverse", "Caesar", "Homoglyph", "Split", "OCR"]
-            for case in pack.cases:
-                # Original
-                console.print(f"  Testing Case {case.id} [Original]...")
-                all_traces.append(runner.run_case(case))
-                
-                # Mutated variants
-                variants = mutator.apply_all(case.prompt)
-                # variants[0] is original
-                for i, v_prompt in enumerate(variants[1:]):
-                    m_name = mutation_names[i] if i < len(mutation_names) else f"Mutation-{i}"
-                    console.print(f"  Testing Case {case.id} [{m_name}]...")
-                    m_case = copy.deepcopy(case)
-                    m_case.prompt = v_prompt
-                    m_case.id = f"{case.id}-{m_name}"
-                    all_traces.append(runner.run_case(m_case))
-        elif adaptive:
-            console.print("[yellow]Adaptive Mode enabled. Retrying on refusal with Judge feedback...[/yellow]")
-            for case in pack.cases:
-                console.print(f"  Running adaptive case: [bold]{case.id}[/bold]")
-                all_traces.append(judge.run_adaptive_case(case))
-        else:
-            if mutate:
-                for case in pack.cases:
-                    case.prompt = random.choice(mutator.apply_all(case.prompt)[1:])
-            # standard run
-            for case in pack.cases:
-                all_traces.append(runner.run_case(case))
-        
-        # Inject metadata
-        for trace in all_traces:
-            base_id = trace.test_case_id.split("-")[0]
-            original_case = next((c for c in pack.cases if c.id == base_id or trace.test_case_id.startswith(c.id)), None)
-            if original_case:
-                trace.metadata['category'] = original_case.category
+            jobs: list[Callable[[], ExecutionTrace]] = []
+            for original_case in pack.cases:
+                for mutation_name, mutated_prompt in mutator.named_variants(
+                    original_case.prompt
+                ):
+                    mutated_case = original_case.model_copy(deep=True)
+                    mutated_case.prompt = mutated_prompt
+                    suffix = re.sub(r"[^A-Za-z0-9]+", "-", mutation_name).strip("-")
+                    mutated_case.id = f"{original_case.id}-{suffix}"
 
-        out_dir.mkdir(parents=True, exist_ok=True)
+                    def execute(
+                        case=mutated_case,
+                        name=mutation_name,
+                        category=original_case.category,
+                    ) -> ExecutionTrace:
+                        trace = runner.run_case(case)
+                        trace.metadata["mutation"] = name
+                        trace.metadata["category"] = category
+                        return trace
+
+                    jobs.append(execute)
+            traces = _run_parallel(jobs, max_workers)
+        elif adaptive:
+            judge = JudgeFeedbackLoop(
+                target_adapter=adapter,
+                mutator=mutator,
+                evaluator=evaluator,
+            )
+            jobs = [
+                lambda case=case: runner.finalize_trace(
+                    case, judge.run_adaptive_case(case, max_retries=max_retries)
+                )
+                for case in pack.cases
+            ]
+            traces = _run_parallel(jobs, max_workers)
+        else:
+            rng = random.Random(seed)
+            cases = []
+            for original_case in pack.cases:
+                case = original_case.model_copy(deep=True)
+                if mutate:
+                    variants = mutator.named_variants(case.prompt)[1:]
+                    mutation_name, case.prompt = rng.choice(variants)
+                else:
+                    mutation_name = "Original"
+                cases.append((case, mutation_name))
+
+            jobs = []
+            for case, mutation_name in cases:
+                def execute(
+                    current_case=case,
+                    name=mutation_name,
+                ) -> ExecutionTrace:
+                    trace = runner.run_case(current_case)
+                    trace.metadata["mutation"] = name
+                    return trace
+
+                jobs.append(execute)
+            traces = _run_parallel(jobs, max_workers)
+
         reporter = Reporter()
-        report_path = (reporter.generate_json(pack, all_traces, out_dir) if format == "json" 
-                       else reporter.generate_markdown(pack, all_traces, out_dir))
-        
-        console.print(f"[bold green]Audit complete![/bold green] Report: [blue]{report_path}[/blue]")
-    except Exception as e:
-        console.print(f"[red]Error during run: {e}[/red]")
-        raise typer.Exit(1)
+        report_path = (
+            reporter.generate_json(pack, traces, out_dir)
+            if report_format == "json"
+            else reporter.generate_markdown(pack, traces, out_dir)
+        )
+        console.print(f"[bold green]Audit complete[/bold green]: {report_path}")
+
+        has_findings = any(
+            trace.evaluation
+            and trace.evaluation.status
+            in {EvaluationStatus.FAIL, EvaluationStatus.PARTIAL}
+            for trace in traces
+        )
+        if fail_on_findings and has_findings:
+            raise typer.Exit(2)
+    except (PackLoadError, RedactionPatternError, FileNotFoundError, ValueError) as exc:
+        console.print(f"[red]Configuration error: {exc}[/red]")
+        raise typer.Exit(1) from exc
+
+
+@app.command("validate-pack")
+def validate_pack(
+    pack_dir: Path = typer.Argument(..., exists=True, file_okay=False, readable=True),
+):
+    """Validate a test pack without sending any provider requests."""
+    adapter = OllamaAdapter()
+    runner = Runner(adapter=adapter)
+    try:
+        pack = runner.load_pack(pack_dir)
+    except PackLoadError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    console.print(f"[green]Valid pack[/green]: {pack.name} ({len(pack.cases)} cases)")
+
+
+@app.command("list-providers")
+def list_providers():
+    """List built-in providers and capabilities."""
+    for name, adapter in sorted(ADAPTERS.items()):
+        capabilities = adapter.capabilities
+        console.print(
+            f"{name}: multi_turn={capabilities.multi_turn}, "
+            f"images={capabilities.images}, tools={capabilities.tools}"
+        )
+
 
 @app.command()
 def version():
     console.print(f"DarkPrompt v{__version__}")
+
 
 if __name__ == "__main__":
     app()
